@@ -1,0 +1,110 @@
+local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
+
+local BuildingSystem = {}
+BuildingSystem.__index = BuildingSystem
+
+BuildingSystem.Config = {
+	MaxParts = 200,
+	MinSize = 1,
+	MaxSize = 20,
+	Cooldown = 0.1,
+	MaxDistance = 350,
+}
+
+function BuildingSystem.new(player)
+	local self = setmetatable({}, BuildingSystem)
+
+	self.Player = player
+	self.Parts = {}
+	self.LastPlace = 0
+
+	return self
+end
+
+function BuildingSystem:ClampSize(size)
+	return Vector3.new(
+		math.clamp(size.X, self.Config.MinSize, self.Config.MaxSize),
+		math.clamp(size.Y, self.Config.MinSize, self.Config.MaxSize),
+		math.clamp(size.Z, self.Config.MinSize, self.Config.MaxSize)
+	)
+end
+
+function BuildingSystem:CanPlace()
+	if tick() - self.LastPlace < self.Config.Cooldown then return false end
+	if #self.Parts >= self.Config.MaxParts then return false end
+	return true
+end
+
+function BuildingSystem:CreatePart(size, color, shape)
+	local part = Instance.new("Part")
+	part.Size = Vector3.zero
+	part.Shape = shape
+	part.Color = color.Color
+	part.Anchored = false
+	part.CanCollide = true
+	part.CanQuery = true
+	part.CanTouch = true
+
+	part:SetAttribute("Owner", self.Player.UserId)
+	part:SetAttribute("ID", HttpService:GenerateGUID(false))
+
+	part.Parent = workspace
+
+	TweenService:Create(part, TweenInfo.new(0.2), {
+		Size = self:ClampSize(size)
+	}):Play()
+
+	return part
+end
+
+function BuildingSystem:SafeWeld(part, target)
+	if not target then return end
+	task.defer(function()
+		if not part or not target then return end
+		if not part.Parent or not target.Parent then return end
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = part
+		weld.Part1 = target
+		weld.Parent = part
+	end)
+end
+
+function BuildingSystem:Register(part)
+	table.insert(self.Parts, part)
+
+	part.Destroying:Connect(function()
+		for i, v in ipairs(self.Parts) do
+			if v == part then
+				table.remove(self.Parts, i)
+				break
+			end
+		end
+	end)
+end
+
+function BuildingSystem:Place(cframe, size, color, shape, hit)
+	if not self:CanPlace() then return end
+	self.LastPlace = tick()
+
+	local part = self:CreatePart(size, color, shape)
+	part.CFrame = cframe
+
+	if hit and hit:IsA("BasePart") then
+		self:SafeWeld(part, hit)
+	end
+
+	self:Register(part)
+
+	return part
+end
+
+function BuildingSystem:DestroyPart(part)
+	if part then
+		part:Destroy()
+		table.remove(self.Parts, part)
+	end
+end
+
+return BuildingSystem
