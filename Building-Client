@@ -1,0 +1,213 @@
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Rs = game:GetService("ReplicatedStorage")
+
+local PlaceEvent = Rs:WaitForChild("PlaceConnection")
+local RemoveEvent = Rs:WaitForChild("RemoveConnection")
+
+local Module = require(Rs:WaitForChild("BuildingService"))
+
+local button = script.Parent
+local TextBox = button.Parent:FindFirstChild("TextBox")
+
+local plr = game.Players.LocalPlayer
+local mouse = plr:GetMouse()
+
+local en = false
+local mode = "Build"
+
+local obj = Instance.new("Part")
+obj.Parent = workspace
+obj.Anchored = true
+obj.CanCollide = false
+obj.CanQuery = false
+obj.CanTouch = false
+obj.Transparency = 1
+obj.Size = Vector3.new(1,1,1) * 4
+
+mouse.TargetFilter = obj
+
+local selection = Instance.new("SelectionBox")
+selection.LineThickness = 0.05
+selection.Color3 = Color3.fromRGB(255, 0, 0)
+selection.Parent = workspace
+selection.Adornee = nil
+
+local grid = 1
+
+local targetOrientation = Vector3.new(0,0,0)
+local currentOrientation = Vector3.new(0,0,0)
+local ROT_SPEED = 0.2
+
+local char = plr.Character or plr.CharacterAdded:Wait()
+local hrp = char:WaitForChild("HumanoidRootPart")
+
+local params = RaycastParams.new()
+params.FilterType = Enum.RaycastFilterType.Exclude
+
+local PositionToSend
+local OrientationToSend = Vector3.zero
+
+local function snap(n, step)
+	return math.floor(n / step + 0.5) * step
+end
+
+local shapeList = {
+	Enum.PartType.Block,
+	Enum.PartType.Ball,
+	Enum.PartType.Cylinder,
+	Enum.PartType.Wedge,
+	Enum.PartType.CornerWedge
+}
+
+local shapeIndex = 1
+local currentShape = shapeList[shapeIndex]
+
+local function parseSize(text)
+	local x, y, z = string.match(text, "(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
+	if not x then return Vector3.new(4,4,4) end
+
+	x, y, z = tonumber(x), tonumber(y), tonumber(z)
+
+	return Vector3.new(
+		math.clamp(x, Module.Config.MinSize, Module.Config.MaxSize),
+		math.clamp(y, Module.Config.MinSize, Module.Config.MaxSize),
+		math.clamp(z, Module.Config.MinSize, Module.Config.MaxSize)
+	)
+end
+
+RunService.RenderStepped:Connect(function()
+	if not en then
+		button.Text = "Enable"
+		obj.Transparency = 1
+		selection.Adornee = nil
+		return
+	end
+
+	button.Text = "Disable"
+	obj.Shape = currentShape
+
+	local ignore = {obj}
+	for _, v in pairs(game.Players:GetPlayers()) do
+		if v.Character then
+			table.insert(ignore, v.Character)
+		end
+	end
+
+	params.FilterDescendantsInstances = ignore
+
+	local ray = workspace:Raycast(
+		workspace.CurrentCamera.CFrame.Position,
+		(mouse.Hit.Position - workspace.CurrentCamera.CFrame.Position).Unit * 500,
+		params
+	)
+
+	if not ray then return end
+
+	local hit = ray.Instance
+
+	if mode == "Remove" then
+		obj.Transparency = 1
+
+		if hit and hit:IsA("BasePart") and hit:GetAttribute("Owner") == plr.UserId then
+			selection.Adornee = hit
+		else
+			selection.Adornee = nil
+		end
+
+		return
+	end
+
+	selection.Adornee = nil
+	obj.Transparency = 0.5
+
+	if TextBox and TextBox.Text ~= "" then
+		obj.Size = parseSize(TextBox.Text)
+	end
+
+	if (hrp.Position - ray.Position).Magnitude > 350 then
+		obj.Transparency = 1
+		return
+	end
+
+	local pos = Vector3.new(
+		snap(ray.Position.X, grid),
+		snap(ray.Position.Y, grid),
+		snap(ray.Position.Z, grid)
+	)
+
+	currentOrientation = currentOrientation:Lerp(targetOrientation, ROT_SPEED)
+
+	local normal = ray.Normal
+
+	local cf =
+		CFrame.new(pos + normal * (obj.Size.Y / 2)) *
+		CFrame.Angles(
+			math.rad(currentOrientation.X),
+			math.rad(currentOrientation.Y),
+			math.rad(currentOrientation.Z)
+		)
+
+	obj.CFrame = cf
+
+	PositionToSend = cf
+	OrientationToSend = currentOrientation
+end)
+
+mouse.Button1Down:Connect(function()
+	if not en then return end
+
+	if mode == "Remove" then
+		if selection.Adornee then
+			RemoveEvent:FireServer(selection.Adornee)
+		end
+		return
+	end
+	
+	local ray = workspace:Raycast(
+		workspace.CurrentCamera.CFrame.Position,
+		(mouse.Hit.Position - workspace.CurrentCamera.CFrame.Position).Unit * 500
+	)
+	
+	PlaceEvent:FireServer(
+		obj.CFrame,
+		obj.Size,
+		BrickColor.random(),
+		currentShape,
+		ray.Instance
+	)
+end)
+
+UIS.InputBegan:Connect(function(input, gp)
+	if gp then return end
+
+	if input.KeyCode == Enum.KeyCode.F then
+		en = not en
+
+	elseif input.KeyCode == Enum.KeyCode.R then
+		targetOrientation += Vector3.new(0,45,0)
+
+	elseif input.KeyCode == Enum.KeyCode.T then
+		targetOrientation += Vector3.new(45,0,0)
+
+	elseif input.KeyCode == Enum.KeyCode.Y then
+		targetOrientation += Vector3.new(0,0,45)
+
+	elseif input.KeyCode == Enum.KeyCode.Z then
+		mode = (mode == "Build") and "Remove" or "Build"
+
+	elseif input.KeyCode == Enum.KeyCode.E then
+		shapeIndex += 1
+		if shapeIndex > #shapeList then shapeIndex = 1 end
+		currentShape = shapeList[shapeIndex]
+
+	elseif input.KeyCode == Enum.KeyCode.Q then
+		shapeIndex -= 1
+		if shapeIndex < 1 then shapeIndex = #shapeList end
+		currentShape = shapeList[shapeIndex]
+	end
+end)
+
+button.MouseButton1Click:Connect(function()
+	en = not en
+end)
