@@ -1,0 +1,65 @@
+local Players = game:GetService("Players")
+local Rs = game:GetService("ReplicatedStorage")
+
+local PlaceEvent = Rs:WaitForChild("PlaceConnection")
+local RemoveEvent = Rs:WaitForChild("RemoveConnection")
+
+local BuildingSystem = require(Rs:WaitForChild("BuildingService"))
+
+local Systems = {}
+local PlayerPartsLimit = {}
+
+local LIMIT = 35
+
+Players.PlayerAdded:Connect(function(plr)
+	Systems[plr] = BuildingSystem.new(plr)
+	PlayerPartsLimit[plr] = 0
+end)
+
+Players.PlayerRemoving:Connect(function(plr)
+	Systems[plr] = nil
+	PlayerPartsLimit[plr] = nil
+end)
+
+PlaceEvent.OnServerEvent:Connect(function(plr, cf, size, color, shape, hit)
+	local sys = Systems[plr]
+	if not sys then return end
+
+	local limit = PlayerPartsLimit[plr]
+	if not limit then return end
+
+	if limit >= LIMIT then warn(plr.Name, "Blocks Limited!") return end
+
+	local char = plr.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+
+	if (hrp.Position - cf.Position).Magnitude > 350 then return end
+
+	if hit and hit:IsDescendantOf(workspace) then
+		PlayerPartsLimit[plr] += 1
+		sys:Place(cf, size, color, shape, hit)
+	end
+end)
+
+RemoveEvent.OnServerEvent:Connect(function(plr, part)
+	local sys = Systems[plr]
+	if not sys then return end
+
+	if typeof(part) ~= "Instance" then return end
+	if not part:IsA("BasePart") then return end
+	if part:GetAttribute("Owner") ~= plr.UserId then return end
+
+	local char = plr.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+
+	if (hrp.Position - part.Position).Magnitude > 350 then return end
+
+	part:Destroy()
+
+	local limit = PlayerPartsLimit[plr]
+	if limit then
+		PlayerPartsLimit[plr] = math.max(limit - 1, 0)
+	end
+end)
